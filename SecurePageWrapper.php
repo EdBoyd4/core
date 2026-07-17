@@ -40,7 +40,7 @@ abstract class SecurePageWrapper
         // If the AuthManager hasn't been instantiated yet (e.g. by login script or workspace router), 
         // bootstrap the authentication system.
         if (!isset($authManager)) {
-            require_once dirname(__DIR__, 2) . '/clarium/init_login.php';
+            require_once __DIR__ . '/init_login.php';
         }
 
         // 1. Enforce that the user has an active, valid session
