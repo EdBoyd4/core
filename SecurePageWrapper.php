@@ -44,7 +44,10 @@ abstract class SecurePageWrapper
         }
 
         // 1. Enforce that the user has an active, valid session
-        $authManager->enforceLogin();
+        if ($authResult = $authManager->enforceLogin()) {
+            header("Location: " . $authResult->redirectUrl);
+            exit;
+        }
 
         // 2. Enforce RBAC
         if (!empty($this->requiredRoles)) {
