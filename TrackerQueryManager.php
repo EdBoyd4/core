@@ -91,10 +91,10 @@ class TrackerQueryManager {
         $types = str_repeat('i', count($ids));
         
         $toolsQuery = match($trackerType) {
-            'leads' => "SELECT lead_id, lead_name, description_of_lead, lead_type_id FROM leads WHERE lead_id IN ($placeholders)",
-            'docs' => "SELECT document_id, file_name, description, document_type_id FROM documents WHERE document_id IN ($placeholders)",
-            'collateral' => "SELECT collateral_item_id, item_name, description, item_type_id FROM collateral_items WHERE collateral_item_id IN ($placeholders)",
-            'informants' => "SELECT informant_id, informant_name, description, informant_type_id FROM informants WHERE informant_id IN ($placeholders)"
+            'leads' => "SELECT _id AS lead_id, lead_name, description_of_lead, lead_type_id FROM leads WHERE _id IN ($placeholders)",
+            'docs' => "SELECT _id AS document_id, document_name AS file_name, description FROM documents WHERE _id IN ($placeholders)",
+            'collateral' => "SELECT _id AS collateral_item_id, item_name, item_description AS description FROM collateral_items WHERE _id IN ($placeholders)",
+            'informants' => "SELECT informant_id, informant_name, description FROM informants WHERE informant_id IN ($placeholders)"
         };
 
         $stmtTools = $toolsDb->prepare($toolsQuery);
