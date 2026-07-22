@@ -24,19 +24,13 @@ class TrackerQueryManager {
         $entityIdCol = "{$entityType}_id";
 
         // Handle Local Trackers (Stored directly in domain DB)
-        if (in_array($trackerType, ['notes', 'deadlines'])) {
+        if (in_array($trackerType, ['deadlines'])) {
             $tableName = "{$entityType}_{$trackerType}";
             
             // Handle specific column names based on tracker type
             $cols = "*";
             $orderBy = "";
-            if ($trackerType === 'notes') {
-                $cols = "_id AS note_id, {$entityType}_note AS note_text, creation_datetime, datetime_of_entry";
-                $orderBy = "ORDER BY creation_datetime ASC";
-                if ($entityType === 'task') {
-                    $cols = "_id AS note_id, task_note, creation_datetime";
-                }
-            } elseif ($trackerType === 'deadlines') {
+            if ($trackerType === 'deadlines') {
                 $cols = "_id AS deadline_id, deadline_datetime, status";
                 $orderBy = "ORDER BY deadline_datetime ASC";
             }
@@ -57,59 +51,101 @@ class TrackerQueryManager {
             return $results;
         }
 
-        // Handle Linked Tools (Stored in PRODUCTION_TOOLS, linked via junction table)
-        $junctionTable = "{$entityType}_{$trackerType}";
-        if ($trackerType === 'docs') $junctionTable = "{$entityType}_docs";
-        
-        $toolIdCol = match($trackerType) {
-            'leads' => 'lead_id',
-            'docs' => 'document_id',
-            'collateral' => 'collateral_item_id',
-            'informants' => 'informant_id',
-            default => throw new InvalidArgumentException("Invalid tracker type: $trackerType")
-        };
-
-        // Step 1: Query Junction Table
-        $stmt = $db->prepare("SELECT $toolIdCol FROM $junctionTable WHERE $entityIdCol = ?");
-        if (!$stmt) return [];
-        
-        $stmt->bind_param('i', $entityId);
-        $stmt->execute();
-        $res = $stmt->get_result();
-        
-        $junctions = [];
-        while ($row = $res->fetch_assoc()) {
-            $junctions[] = $row;
+        // Handle Fully Polymorphic Linked Tools (Junction & Target both in PRODUCTION_TOOLS)
+        if (in_array($trackerType, ['subject_individuals', 'subject_locations', 'notes', 'leads', 'docs', 'collateral', 'informants'])) {
+            $junctionTable = match($trackerType) {
+                'subject_individuals' => 'entity_subject_individuals',
+                'subject_locations' => 'entity_subject_locations',
+                'notes' => 'entity_notes',
+                'leads' => 'entity_leads',
+                'docs' => 'entity_documents',
+                'collateral' => 'entity_collateral',
+                'informants' => 'entity_informants'
+            };
+            
+            $toolIdCol = match($trackerType) {
+                'subject_individuals' => 'subject_individual_id',
+                'subject_locations' => 'subject_location_id',
+                'notes' => 'note_id',
+                'leads' => 'lead_id',
+                'docs' => 'document_id',
+                'collateral' => 'collateral_id',
+                'informants' => 'informant_id'
+            };
+            
+            $extraJunctionCols = $trackerType === 'notes' ? ", note_type_id" : "";
+            
+            $stmt = $toolsDb->prepare("SELECT $toolIdCol $extraJunctionCols FROM $junctionTable WHERE scope_level_entry = ? AND entity_id = ?");
+            if (!$stmt) return [];
+            
+            $stmt->bind_param('si', $entityType, $entityId);
+            $stmt->execute();
+            $res = $stmt->get_result();
+            
+            $junctionData = [];
+            $ids = [];
+            while ($row = $res->fetch_assoc()) {
+                $ids[] = $row[$toolIdCol];
+                $junctionData[$row[$toolIdCol]] = $row;
+            }
+            $stmt->close();
+            
+            if (empty($ids)) return [];
+            
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $types = str_repeat('i', count($ids));
+            
+            $toolsQuery = match($trackerType) {
+                'subject_individuals' => "
+                    SELECT s._id AS subject_individual_id, s.first_name, s.last_name, s.description, s.datetime_of_entry,
+                           p.dob, p.ssn
+                    FROM subject_individuals s
+                    LEFT JOIN pii p ON s._id = p.subject_individual_id
+                    WHERE s._id IN ($placeholders)
+                ",
+                'subject_locations' => "SELECT _id AS subject_location_id, location_name, address_line_1, address_line_2, city, state, zip_code, description, datetime_of_entry FROM subject_locations WHERE _id IN ($placeholders)",
+                'leads' => "SELECT _id AS lead_id, lead_name, description_of_lead, lead_type_id FROM leads WHERE _id IN ($placeholders)",
+                'docs' => "SELECT _id AS document_id, document_name AS file_name, description FROM documents WHERE _id IN ($placeholders)",
+                'collateral' => "SELECT _id AS collateral_item_id, item_name, item_description AS description FROM collateral_items WHERE _id IN ($placeholders)",
+                'informants' => "SELECT informant_id, informant_name, description FROM informants WHERE informant_id IN ($placeholders)",
+                'notes' => "SELECT _id AS note_id, note_text, created_at AS datetime_of_entry FROM notes WHERE _id IN ($placeholders)"
+            };
+            
+            $stmtTools = $toolsDb->prepare($toolsQuery);
+            if (!$stmtTools) return [];
+            
+            $stmtTools->bind_param($types, ...$ids);
+            $stmtTools->execute();
+            $resTools = $stmtTools->get_result();
+            
+            $results = [];
+            while ($row = $resTools->fetch_assoc()) {
+                $id = $row[$toolIdCol];
+                $mergedRow = array_merge($row, $junctionData[$id] ?? []);
+                
+                // For backward compatibility with existing views/partials
+                if ($trackerType === 'notes') {
+                    $mergedRow['case_note'] = $row['note_text'];
+                    $mergedRow['assignment_note'] = $row['note_text'];
+                    $mergedRow['investigation_note'] = $row['note_text'];
+                    $mergedRow['task_note'] = $row['note_text'];
+                    $mergedRow['text'] = $row['note_text'];
+                    
+                    // Map note_type_id to the legacy view expected keys
+                    if (isset($mergedRow['note_type_id'])) {
+                        $mergedRow['case_note_type'] = $mergedRow['note_type_id'];
+                        $mergedRow['assignment_note_type'] = $mergedRow['note_type_id'];
+                        $mergedRow['investigation_note_type'] = $mergedRow['note_type_id'];
+                        $mergedRow['task_note_type'] = $mergedRow['note_type_id'];
+                        $mergedRow['type'] = $mergedRow['note_type_id'];
+                    }
+                }
+                $results[] = $mergedRow;
+            }
+            $stmtTools->close();
+            return $results;
         }
-        $stmt->close();
-        
-        if (empty($junctions)) return [];
-        
-        // Step 2: Query Tools Database
-        $ids = array_column($junctions, $toolIdCol);
-        $placeholders = implode(',', array_fill(0, count($ids), '?'));
-        $types = str_repeat('i', count($ids));
-        
-        $toolsQuery = match($trackerType) {
-            'leads' => "SELECT _id AS lead_id, lead_name, description_of_lead, lead_type_id FROM leads WHERE _id IN ($placeholders)",
-            'docs' => "SELECT _id AS document_id, document_name AS file_name, description FROM documents WHERE _id IN ($placeholders)",
-            'collateral' => "SELECT _id AS collateral_item_id, item_name, item_description AS description FROM collateral_items WHERE _id IN ($placeholders)",
-            'informants' => "SELECT informant_id, informant_name, description FROM informants WHERE informant_id IN ($placeholders)"
-        };
 
-        $stmtTools = $toolsDb->prepare($toolsQuery);
-        if (!$stmtTools) return [];
-        
-        $stmtTools->bind_param($types, ...$ids);
-        $stmtTools->execute();
-        $resTools = $stmtTools->get_result();
-        
-        $results = [];
-        while ($row = $resTools->fetch_assoc()) {
-            $results[] = $row;
-        }
-        $stmtTools->close();
-        
-        return $results;
+        return [];
     }
 }
