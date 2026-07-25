@@ -107,7 +107,7 @@ class TrackerQueryManager {
                 'leads' => "SELECT _id AS lead_id, lead_name, description_of_lead, lead_type_id FROM leads WHERE _id IN ($placeholders)",
                 'docs' => "SELECT _id AS document_id, document_name AS file_name, description FROM documents WHERE _id IN ($placeholders)",
                 'collateral' => "SELECT _id AS collateral_item_id, item_name, item_description AS description FROM collateral_items WHERE _id IN ($placeholders)",
-                'informants' => "SELECT informant_id, informant_name, description FROM informants WHERE informant_id IN ($placeholders)",
+                'informants' => "SELECT _id AS informant_id, informant_name, description FROM informants WHERE _id IN ($placeholders)",
                 'notes' => "SELECT _id AS note_id, note_text, created_at AS datetime_of_entry FROM notes WHERE _id IN ($placeholders)"
             };
             
