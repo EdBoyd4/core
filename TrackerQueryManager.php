@@ -52,25 +52,27 @@ class TrackerQueryManager {
         }
 
         // Handle Fully Polymorphic Linked Tools (Junction & Target both in PRODUCTION_TOOLS)
-        if (in_array($trackerType, ['subject_individuals', 'subject_locations', 'notes', 'leads', 'docs', 'collateral', 'informants'])) {
+        if (in_array($trackerType, ['individual', 'location_physical', 'location_virtual', 'organization', 'analysis', 'findings', 'subject_individuals', 'subject_locations', 'notes', 'docs'])) {
             $junctionTable = match($trackerType) {
-                'subject_individuals' => 'entity_subject_individuals',
-                'subject_locations' => 'entity_subject_locations',
-                'notes' => 'entity_notes',
-                'leads' => 'entity_leads',
-                'docs' => 'entity_documents',
-                'collateral' => 'entity_collateral',
-                'informants' => 'entity_informants'
+                'individual', 'subject_individuals' => 'scopes_and_individuals_junction',
+                'location_physical', 'subject_locations' => 'scopes_and_location_physical_junction',
+                'location_virtual' => 'scopes_and_location_virtual_junction',
+                'organization' => 'scopes_and_organizations_junction',
+                'analysis' => 'scopes_and_analysis_junction',
+                'findings' => 'scopes_and_findings_junction',
+                'notes' => 'scopes_and_notes_junction',
+                'docs' => 'scopes_and_documents_junction'
             };
             
             $toolIdCol = match($trackerType) {
-                'subject_individuals' => 'subject_individual_id',
-                'subject_locations' => 'subject_location_id',
+                'individual', 'subject_individuals' => 'individuals_id',
+                'location_physical', 'subject_locations' => 'location_id',
+                'location_virtual' => 'location_virtual_id',
+                'organization' => 'organization_id',
+                'analysis' => 'analysis_id',
+                'findings' => 'finding_id',
                 'notes' => 'note_id',
-                'leads' => 'lead_id',
-                'docs' => 'document_id',
-                'collateral' => 'collateral_id',
-                'informants' => 'informant_id'
+                'docs' => 'document_id'
             };
             
             $extraJunctionCols = $trackerType === 'notes' ? ", note_type_id" : "";
@@ -96,18 +98,19 @@ class TrackerQueryManager {
             $types = str_repeat('i', count($ids));
             
             $toolsQuery = match($trackerType) {
-                'subject_individuals' => "
-                    SELECT s._id AS subject_individual_id, s.first_name, s.last_name, s.description, s.datetime_of_entry,
+                'individual', 'subject_individuals' => "
+                    SELECT s._id AS subject_individual_id, s.first_name, s.last_name, s.reference_name, s.description, s.datetime_of_entry,
                            p.dob, p.ssn
-                    FROM subject_individuals s
-                    LEFT JOIN pii p ON s._id = p.subject_individual_id
+                    FROM individuals s
+                    LEFT JOIN pii p ON s._id = p.individuals_id
                     WHERE s._id IN ($placeholders)
                 ",
-                'subject_locations' => "SELECT _id AS subject_location_id, location_name, address_line_1, address_line_2, city, state, zip_code, description, datetime_of_entry FROM subject_locations WHERE _id IN ($placeholders)",
-                'leads' => "SELECT _id AS lead_id, lead_name, description_of_lead, lead_type_id FROM leads WHERE _id IN ($placeholders)",
+                'location_physical', 'subject_locations' => "SELECT _id AS subject_location_id, location_name, address_line_1, address_line_2, city, state, zip_code, description, datetime_of_entry FROM location_physical WHERE _id IN ($placeholders)",
+                'location_virtual' => "SELECT _id AS location_virtual_id, virtual_address, description, datetime_of_entry FROM location_virtual WHERE _id IN ($placeholders)",
+                'organization' => "SELECT _id AS organization_id, organization_name, description, datetime_of_entry FROM organizations WHERE _id IN ($placeholders)",
+                'analysis' => "SELECT _id AS analysis_id, analysis_text, datetime_of_entry FROM analysis WHERE _id IN ($placeholders)",
+                'findings' => "SELECT _id AS finding_id, finding_text, datetime_of_entry FROM findings WHERE _id IN ($placeholders)",
                 'docs' => "SELECT _id AS document_id, document_name AS file_name, description FROM documents WHERE _id IN ($placeholders)",
-                'collateral' => "SELECT _id AS collateral_item_id, item_name, item_description AS description FROM collateral_items WHERE _id IN ($placeholders)",
-                'informants' => "SELECT _id AS informant_id, informant_name, description FROM informants WHERE _id IN ($placeholders)",
                 'notes' => "SELECT _id AS note_id, note_text, created_at AS datetime_of_entry FROM notes WHERE _id IN ($placeholders)"
             };
             
